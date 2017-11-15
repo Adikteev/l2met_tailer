@@ -1,69 +1,83 @@
 package main
 
 import (
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
-	"fmt"
+
+	"flag"
+
+	"github.com/ryandotsmith/l2met/conf"
+	"github.com/ryandotsmith/l2met/metchan"
+	"github.com/ryandotsmith/l2met/outlet"
+	"github.com/ryandotsmith/l2met/reader"
+	"github.com/ryandotsmith/l2met/receiver"
+	"github.com/ryandotsmith/l2met/store"
 )
 
+var l2metCfg *conf.D
+var broker string
+var group string
+var topics []string
+var usage bool
+
+type CsvFlag []string 
+(f CsvFlag) String() string {
+	return strings.Join(f, ",")
+}
+
+(f CsvFlag) Set(string) error {
+	return strings.Split(f, ",")
+}
+
+func init() {
+	l2metCfg = conf.New()
+	broker = flag.String("b,brokers", "localhost:9092", "kafka brokers")
+	group = flag.String("g,group-id", "", "kafka consumer group id")
+	usage = flag.Bool("h,help", false, "Help, usage")
+	flag.Var(topics, "t,topics", "", "kafka topics")
+
+	flag.Parse()
+}
+
 func main() {
-	if len(os.Args) < 4 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <broker> <group> <topics..>\n",
-			os.Args[0])
+	
+	if usage {
+		flag.Usage()
 		os.Exit(1)
 	}
-
-	broker := os.Args[1]
-	group := os.Args[2]
-	topics := os.Args[3:]
+	
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 
-	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers":    broker,
-		"group.id":             group,
-		"session.timeout.ms":   6000,
-		"default.topic.config": kafka.ConfigMap{"auto.offset.reset": "earliest"}})
+	//client := librato.NewClient(os.Getenv("LIBRATO_EMAIL"), os.Getenv("LIBRATO_TOKEN"))
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create consumer: %s\n", err)
-		os.Exit(1)
+	mchan := metchan.New(l2metCfg)
+	mchan.Start()
+
+	// The store will be used by receivers and outlets.
+	var st store.Store
+	if len(l2metCfg.RedisHost) > 0 {
+		redisStore := store.NewRedisStore(l2metCfg)
+		redisStore.Mchan = mchan
+		st = redisStore
+		fmt.Printf("at=initialized-redis-store\n")
+	} else {
+		st = store.NewMemStore()
+		fmt.Printf("at=initialized-mem-store\n")
 	}
 
-	fmt.Printf("Created Consumer %v\n", c)
+	if l2metCfg.UsingReciever {
+		recv := receiver.NewKafkaReceiver(l2metCfg, st)
+		recv.Mchan = mchan
+		recv.Start()
 
-	err = c.SubscribeTopics(topics, nil)
-
-	run := true
-
-	for run == true {
-		select {
-		case sig := <-sigchan:
-			fmt.Printf("Caught signal %v: terminating\n", sig)
-			run = false
-		default:
-			ev := c.Poll(100)
-			if ev == nil {
-				continue
-			}
-
-			switch e := ev.(type) {
-			case *kafka.Message:
-				fmt.Printf("%% Message on %s:\n%s\n",
-					e.TopicPartition, string(e.Value))
-			case kafka.PartitionEOF:
-				fmt.Printf("%% Reached %v\n", e)
-			case kafka.Error:
-				fmt.Fprintf(os.Stderr, "%% Error: %v\n", e)
-				run = false
-			default:
-				fmt.Printf("Ignored %v\n", e)
-			}
-		}
 	}
 
-	fmt.Printf("Closing consumer\n")
-	c.Close()
+	rdr := reader.New(l2metCfg, st)
+	rdr.Mchan = mchan
+	outlet := outlet.NewLibratoOutlet(l2metCfg, rdr)
+	outlet.Mchan = mchan
+	outlet.Start()
 }
