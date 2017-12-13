@@ -12,9 +12,18 @@ l2met_tailer -k localhost:9092 -t mytopic --librato-user me@librato.com --librat
 or simply, for the many configuration options and usage 
 ```
 go get -u github.com/Adikteev/l2met_tailer
-l2met_tailer -h
+l2met_tailer --help
 ```
 
 For custom usage, see the godoc for the KafkaReceiver type, and for the rest refer to the l2met documentation.
 
 
+#### Bare Setup 
+
+````
+export SECRETS=$(dd if=/dev/urandom bs=32 count=1 2>/dev/null | openssl base64)
+export TZ=UTC
+export REDIS_URL=redis://localhost:6379
+go build .
+./l2met_tailer --help
+````

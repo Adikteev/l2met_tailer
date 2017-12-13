@@ -12,38 +12,41 @@ import (
 	"github.com/ryandotsmith/l2met/metchan"
 	"github.com/ryandotsmith/l2met/outlet"
 	"github.com/ryandotsmith/l2met/reader"
-	"github.com/ryandotsmith/l2met/receiver"
 	"github.com/ryandotsmith/l2met/store"
+	"strings"
 )
 
 var l2metCfg *conf.D
-var broker string
-var group string
-var topics []string
-var usage bool
+var broker *string
+var group *string
+var topics CsvFlag
+var usage *bool
 
 type CsvFlag []string 
-(f CsvFlag) String() string {
-	return strings.Join(f, ",")
+
+func (f *CsvFlag) String() string {
+	return strings.Join(*f, ",")
 }
 
-(f CsvFlag) Set(string) error {
-	return strings.Split(f, ",")
+func (f *CsvFlag) Set(value string) error {
+	*f = strings.Split(value, ",")
+	return nil
 }
 
 func init() {
 	l2metCfg = conf.New()
-	broker = flag.String("b,brokers", "localhost:9092", "kafka brokers")
-	group = flag.String("g,group-id", "", "kafka consumer group id")
-	usage = flag.Bool("h,help", false, "Help, usage")
-	flag.Var(topics, "t,topics", "", "kafka topics")
+
+	broker = flag.String("brokers", "localhost:9092", "kafka brokers")
+	group = flag.String("group-id", "", "kafka consumer group id")
+	usage = flag.Bool("help", false, "Help, usage")
+	flag.Var(&topics, "topics", "kafka topics")
 
 	flag.Parse()
 }
 
 func main() {
 	
-	if usage {
+	if *usage {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -69,7 +72,9 @@ func main() {
 	}
 
 	if l2metCfg.UsingReciever {
-		recv := receiver.NewKafkaReceiver(l2metCfg, st)
+		recv := NewKafkaReceiver(l2metCfg, st, KafkaConfig{
+			Broker: *broker, Group: *group, Topics: topics, Properties: nil, SigChan: sigchan,
+		})
 		recv.Mchan = mchan
 		recv.Start()
 

@@ -9,16 +9,14 @@ import (
 	"bytes"
 	"time"
 	"github.com/ryandotsmith/l2met/store"
-	"strings"
-	"net/http"
 	"fmt"
-	"github.com/ryandotsmith/l2met/auth"
-	"io/ioutil"
 	"github.com/ryandotsmith/l2met/parser"
 	"bufio"
 	"github.com/ryandotsmith/l2met/receiver"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"os"
+	"log/syslog"
+	"github.com/satori/go.uuid"
 )
 
 // The register accumulates buckets in memory.
@@ -90,7 +88,7 @@ func (r *KafkaReceiver) StartConsumer() {
 	for k, v := range r.KafkaConfig.Properties { 
 		kafkaConf.SetKey(k, kafka.ConfigValue(v))
 	}
-	c, err := kafka.NewConsumer()
+	c, err := kafka.NewConsumer(kafkaConf)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create consumer: %s\n", err)
@@ -113,12 +111,14 @@ func (r *KafkaReceiver) StartConsumer() {
 			if ev == nil {
 				continue
 			}
-
 			switch e := ev.(type) {
 			case *kafka.Message:
-				fmt.Printf("%% Message on %s:\n%s\n",
-					e.TopicPartition, string(e.Value))
-				r.Receive(e.Value, {}) 
+				msg, err := msgAsSyslog(e.Value)
+				if err != nil {
+					fmt.Printf("Could not serialize message for syslog %s : %v\n", msg, err)
+				} else {
+					r.Receive(msg, nil)
+				}
 			case kafka.PartitionEOF:
 				fmt.Printf("%% Reached %v\n", e)
 			case kafka.Error:
@@ -133,16 +133,31 @@ func (r *KafkaReceiver) StartConsumer() {
 	fmt.Printf("Closing consumer\n")
 	c.Close()
 }
+func msgAsSyslog(msg []byte) ([]byte, error) {
+	hostname, _ := os.Hostname() //hostname
+	p := syslog.LOG_INFO //log level
+	tag := "l2mt" //tag
+	nl := "\n" //newline
+	buf := bytes.NewBufferString("")
+
+	timestamp := time.Now().Format(time.RFC3339)
+
+	_, err := fmt.Fprintf(buf, "%d %d %s %s %s %d %s %s%s",
+	len(msg), p, timestamp, hostname,
+	tag, os.Getpid(), uuid.NewV4().String(), msg, nl)
+	println(string(buf.Bytes()))
+	return buf.Bytes(), err
+}
 
 func (r *KafkaReceiver) Receive(b []byte, opts map[string][]string) {
 	r.inFlight.Add(1)
 	r.Inbox <- &receiver.LogRequest{b, opts}
+
 }
 
 // Start moving data through the receiver's pipeline.
 func (r *KafkaReceiver) Start() {
 	// Start the kafka consumer, parallelism is determined by partitions within
-	r.StartConsumer()
 
 	// Accepting the data involves parsing logs messages
 	// into buckets. It is mostly CPU bound, so
@@ -163,6 +178,8 @@ func (r *KafkaReceiver) Start() {
 	// It removes buckets from the register to the outbox.
 	go r.scheduleTransfer()
 	go r.Report()
+
+	r.StartConsumer()
 }
 
 // This function can be used as
