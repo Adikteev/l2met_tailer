@@ -17,6 +17,7 @@ import (
 	"os"
 	"log/syslog"
 	"github.com/satori/go.uuid"
+	"strconv"
 )
 
 // The register accumulates buckets in memory.
@@ -117,7 +118,7 @@ func (r *KafkaReceiver) StartConsumer() {
 				if err != nil {
 					fmt.Printf("Could not serialize message for syslog %s : %v\n", msg, err)
 				} else {
-					r.Receive(msg, nil)
+					r.Receive(msg, map[string][]string{"auth": {"sup"}})
 				}
 			case kafka.PartitionEOF:
 				fmt.Printf("%% Reached %v\n", e)
@@ -142,11 +143,12 @@ func msgAsSyslog(msg []byte) ([]byte, error) {
 
 	timestamp := time.Now().Format(time.RFC3339)
 
-	_, err := fmt.Fprintf(buf, "%d %d %s %s %s %d %s %s%s",
-	len(msg), p, timestamp, hostname,
-	tag, os.Getpid(), uuid.NewV4().String(), msg, nl)
-	println(string(buf.Bytes()))
-	return buf.Bytes(), err
+	_, err := fmt.Fprintf(buf, "<%d>1 %s %s %s %d %s %s%s",
+		p, timestamp, hostname, tag, os.Getpid(), uuid.NewV4().String(), msg, nl)
+	//println(string(buf.Bytes()))
+	msgWithLen := append([]byte(strconv.Itoa(len(string(buf.Bytes())))), []byte(" ")...)
+	msgWithLen = append(msgWithLen, buf.Bytes()...)
+	return msgWithLen, err
 }
 
 func (r *KafkaReceiver) Receive(b []byte, opts map[string][]string) {
