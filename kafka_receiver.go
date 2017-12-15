@@ -18,6 +18,7 @@ import (
 	"log/syslog"
 	"github.com/satori/go.uuid"
 	"strconv"
+	"github.com/ryandotsmith/l2met/auth"
 )
 
 // The register accumulates buckets in memory.
@@ -100,6 +101,13 @@ func (r *KafkaReceiver) StartConsumer() {
 
 	err = c.SubscribeTopics(r.KafkaConfig.Topics, nil)
 
+	libratoCreds := os.Getenv("LIBRATO_USER") + ":" + os.Getenv("LIBRATO_TOKEN")
+	pwd, err := auth.EncryptAndSign([]byte(libratoCreds))
+	if err != nil {
+		println("Could not sign password !", err.Error())
+		return
+	}
+
 	run := true
 
 	for run == true {
@@ -118,7 +126,7 @@ func (r *KafkaReceiver) StartConsumer() {
 				if err != nil {
 					fmt.Printf("Could not serialize message for syslog %s : %v\n", msg, err)
 				} else {
-					r.Receive(msg, map[string][]string{"auth": {"sup"}})
+					r.Receive(msg, map[string][]string{"auth": {string(pwd)}})
 				}
 			case kafka.PartitionEOF:
 				fmt.Printf("%% Reached %v\n", e)

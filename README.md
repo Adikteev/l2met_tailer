@@ -27,3 +27,9 @@ export REDIS_URL=redis://localhost:6379
 go build .
 ./l2met_tailer --help
 ````
+
+Additional credentials : 
+```
+export LIBRATO_EMAIL=
+export LIBRATO_TOKEN=
+```

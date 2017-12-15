@@ -71,6 +71,12 @@ func main() {
 		fmt.Printf("at=initialized-mem-store\n")
 	}
 
+	rdr := reader.New(l2metCfg, st)
+	rdr.Mchan = mchan
+	outlet := outlet.NewLibratoOutlet(l2metCfg, rdr)
+	outlet.Mchan = mchan
+	outlet.Start()
+
 	if l2metCfg.UsingReciever {
 		recv := NewKafkaReceiver(l2metCfg, st, KafkaConfig{
 			Broker: *broker, Group: *group, Topics: topics, Properties: nil, SigChan: sigchan,
@@ -79,10 +85,4 @@ func main() {
 		recv.Start()
 
 	}
-
-	rdr := reader.New(l2metCfg, st)
-	rdr.Mchan = mchan
-	outlet := outlet.NewLibratoOutlet(l2metCfg, rdr)
-	outlet.Mchan = mchan
-	outlet.Start()
 }
